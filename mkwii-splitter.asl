@@ -125,6 +125,8 @@ init {
     vars.watchers = new MemoryWatcherList();
     //pointeur qui contiendra l'addresse de base de la mémoire MEM2
     IntPtr ptr = IntPtr.Zero;
+    //détecte si le joueur est entré dans le menu solo
+    vars.isinsolo = false;
 
     //function récupérer sur un code déjà existant pour retrouver la MEM2
     var scanner = new SignatureScanner(game, modules.First().BaseAddress, modules.First().ModuleMemorySize);
@@ -155,11 +157,12 @@ init {
     vars.watchers.Add(new MemoryWatcher<byte> (ptr + 0x000002FA36E - 0x00000020000) { Name = "InGame"});
     vars.watchers.Add(new MemoryWatcher<byte> (ptr + 0x000009E1877 - 0x00000020000) { Name = "InPause"});
     vars.watchers.Add(new MemoryWatcher<byte> (ptr + 0x000009C26B3) { Name = "IdGame"});
+                       
+    // vars.pointinmenu = 0x313C823;
+    // vars.ptrtest = ptr + vars.pointinmenu;
+    // print(vars.ptrtest.ToString("X"));
 
-    vars.pointinmenu = 0x000002C2D14 + 0x2DEB5B4;
-    vars.ptrtest = ptr + vars.pointinmenu;
-
-    vars.watchers.Add(new MemoryWatcher<byte> (ptr + vars.pointinmenu) { Name = "InMenu"});
+    // vars.watchers.Add(new MemoryWatcher<byte> (ptr + vars.pointinmenu) { Name = "InMenu"});
 
     /*
         Fin des pointeurs statiques
@@ -185,6 +188,7 @@ update {
 
     // print("id menu : 0x" + vars.watchers["InMenu"].Current.ToString("X"));
     // print("id game : 0x" + vars.watchers["IdGame"].Current.ToString("X"));
+
 
     //récupération du pointeur statique raceinfo : 809bd730 -> https://github.com/SeekyCt/mkw-structures/blob/bcc4f19aa04ac7bf45e6a4de72f43a779899fe6c/raceinfo.h#L109
     vars.watchersmemory.Add(new MemoryWatcher<int> (vars.ptr + 0x000009BD730) { Name = "Memory0"});
@@ -312,6 +316,39 @@ update {
     vars.timerfinish += TimeSpan.FromMilliseconds(vars.intvalf7);
     // print("time : " + vars.timerfinish.ToString());
 
+
+    
+    /*
+        récupération de la scène encore pour pouvoir gérer par la suite les start et reset
+    */
+    vars.watchersmemory.Add(new MemoryWatcher<int> (vars.ptr + 0x000009C1E38) { Name = "MemorySceneId1"});
+    vars.watchersmemory.UpdateAll(game);
+
+    vars.intmenu = (int)vars.ToLittleEndian(vars.watchersmemory["MemorySceneId1"].Current);
+    // print("pointeur : " + vars.intmenu.ToString("X"));
+    
+    vars.intmenu = unchecked((int)vars.intmenu - (int)0x8E000000);
+    //216B328
+    // print("pointeur after : " + vars.intmenu.ToString("X"));
+    
+    vars.watchersmemory.Add(new MemoryWatcher<int> (vars.ptr + vars.intmenu) { Name = "MemorySceneId2"});
+    vars.watchersmemory.UpdateAll(game);
+
+    vars.intmenu1 = (int)vars.ToLittleEndian(vars.watchersmemory["MemorySceneId2"].Current);
+    // print("pointeur2 : " + vars.intmenu1.ToString("X"));
+    
+    vars.intmenu1 = unchecked((int)0x00080000000 + (int)vars.intmenu1);
+
+    vars.watchersmemory.Add(new MemoryWatcher<int> (vars.ptr + vars.intmenu1) { Name = "MemorySceneId3"});
+    vars.watchersmemory.UpdateAll(game);
+
+    vars.scene = (int)vars.ToLittleEndian(vars.watchersmemory["MemorySceneId3"].Current);
+
+    /*
+        Fin de la gestion des pointeurs pour le menu
+        -------------------------
+    */
+
 } 
 
 split {
@@ -368,11 +405,15 @@ split {
 start
 {
     //détecte si nous sommes encore dans le menu du jeu, si nous passons hors menu, le timer se lance, ça n'est pas exactement au "OK" mais à une seconde prêt, de toute façon le real time a maintenant peu d'importance
-	if (vars.watchers["InMenu"].Current == 0 && vars.isstart == false) {
+    if (vars.scene == 0x0 && vars.isinsolo == true && vars.isstart == false) {
         timer.IsGameTimePaused = true;
         vars.isstart = true;
 		return true;
-	}
+	}else if(vars.scene == 0x48){
+        vars.isinsolo = true;
+    }else{
+        vars.isinsolo = false;
+    }
 }
 
 //anien sytème de chargement, je n'en n'ai pas besoin car mon ingame time est correctement lié au jeu
@@ -421,7 +462,7 @@ gameTime
 
 reset {
     //si on détecte que le joueur est retourné au menu on reset
-    if(vars.watchers["InMenu"].Current == 1){
+    if(vars.scene == 0x41 || vars.scene == 0x54 || vars.scene == 0x55 || vars.scene == 0x7A){
         return true;
     }else{
         return false;
